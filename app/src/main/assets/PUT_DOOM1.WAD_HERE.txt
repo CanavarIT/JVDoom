@@ -1,0 +1,3 @@
+Put doom1.wad here (app/src/main/assets/doom1.wad) before building.
+Any IWAD works: doom1.wad (shareware), doom.wad, doom2.wad, freedoom1.wad, freedoom2.wad.
+Alternatively copy it to the phone: Android/data/com.java.jvdoom/files/ or pick it from the app on first start.
