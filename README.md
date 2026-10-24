@@ -45,7 +45,12 @@ Frame flow: the game thread advances the simulation at 35 tics/s, `Renderer` dra
 1. Open the project in Android Studio / AndroidIDE.
 2. Build and run (`./gradlew assembleDebug`).
 
+## License
+
+The source code of JVDoom is released under the [MIT License](LICENSE).
+
+**The MIT License does not apply to `doom1.wad`.** The WAD contains the graphics, sounds, music and maps of Doom, which are © id Software. It is the shareware version, distributed under id Software's shareware terms, and is included only so the game can run out of the box.
+
 ## Credits
 
-- Doom © id Software. This project is an independent, unofficial engine reimplementation.
-- Shareware `doom1.wad` is distributed under id Software's shareware terms.
+- Doom © id Software. This project is an independent, unofficial engine reimplementation and is not affiliated with or endorsed by id Software or Bethesda.
