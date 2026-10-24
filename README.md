@@ -1,5 +1,9 @@
 # JVDoom
 
+![Java](https://img.shields.io/github/languages/top/CanavarIT/JVDoom?label=java&color=blue)
+![Code size](https://img.shields.io/github/languages/code-size/CanavarIT/JVDoom?label=code%20size&color=blue)
+![License](https://img.shields.io/github/license/CanavarIT/JVDoom?label=license&color=orange)
+
 A from-scratch **Doom (1993) engine for Android written in pure Java**. No NDK, no native code, no external libraries — it reads the original WAD file and renders everything itself on the CPU.
 
 > ⚠️ **Beta.** The game is fully playable, but there may be small, minor bugs. Bug reports are welcome.
