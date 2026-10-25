@@ -114,7 +114,7 @@ public final class Hud {
         lastTic = g.tic;
         int pain = painLevel(g.health);
         if (g.state == Game.ST_DEAD || g.health <= 0) { face = "STFDEAD0"; return; }
-        if (g.invuln > 0) { face = "STFGOD0"; return; }
+        if (g.invuln > 0 || g.god) { face = "STFGOD0"; return; }
         if (g.hurtTic > hurtSeen) {
             hurtSeen = g.hurtTic;
             faceCount = 35;

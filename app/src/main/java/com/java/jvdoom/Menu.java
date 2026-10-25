@@ -14,10 +14,23 @@ import java.util.List;
  * drawn from the WAD graphics, plus a "JVDoom Setup" page with the app's own settings.
  */
 public final class Menu {
-    static final int S_MAIN = 0, S_EPI = 1, S_SKILL = 2, S_OPT = 3, S_SND = 4, S_JV = 5, S_HELP = 6, S_QUIT = 7, S_END = 8;
+    static final int S_MAIN = 0, S_EPI = 1, S_SKILL = 2, S_OPT = 3, S_SND = 4, S_JV = 5, S_HELP = 6, S_QUIT = 7, S_END = 8,
+            S_JVV = 9, S_JVC = 10, S_JVG = 11, S_JVX = 12, S_JVP = 13, S_LOAD = 14, S_SAVE = 15;      // setup sub-pages: video, controls, gameplay, cheats
     static final String[] RES_LABEL = {"LOW 180P", "MEDIUM 240P", "HIGH 360P"};
     static final String[] SIZE_LABEL = {"SMALL", "MEDIUM", "LARGE"};
     static final String[] ALPHA_LABEL = {"LOW", "MEDIUM", "HIGH"};
+    static final String[] BRIGHT_LABEL = {"OFF", "LOW", "MEDIUM", "HIGH"};
+    static final String[] XHAIR_LABEL = {"OFF", "DOT", "CROSS"};
+    static final String[] ASPECT_LABEL = {"FULL", "4:3", "5:4", "16:10", "16:9", "21:9", "SQUARE"};
+    static final String[] SPEED_LABEL = {"SLOW", "NORMAL", "FAST", "TURBO"};
+    static final String[] TAKEN_LABEL = {"NONE", "HALF", "NORMAL", "DOUBLE"};
+    static final String[] DEALT_LABEL = {"NORMAL", "DOUBLE", "X4", "X10"};
+    static final String[] TEMPO_LABEL = {"SLOW", "NORMAL", "FAST", "TURBO"};
+    static final String[] FOV_LABEL = {"NARROW", "NORMAL", "WIDE", "ULTRA WIDE"};
+    static final String[] FILTER_LABEL = {"OFF", "GRAYSCALE", "SEPIA", "NIGHT VISION", "INFERNO"};
+    static final String[] INFO_LABEL = {"OFF", "KILLS", "KILLS AND TIME", "TIME"};
+
+    static boolean isJV(int s) { return s == S_JV || s >= S_JVV; }
 
     static final class It {
         final int id, slider;
@@ -32,7 +45,7 @@ public final class Menu {
     float[] itY = new float[16];
     int ax, ay;
     int scr = S_MAIN, prev = S_MAIN, helpPage;
-    final int[] sel = new int[9];
+    final int[] sel = new int[16];
     int episode = 1;
     float sx = 1, sy = 1, ox, oy;
     boolean drag;
@@ -53,6 +66,7 @@ public final class Menu {
             case S_MAIN: gv.closeMenu(); return;
             case S_SKILL: scr = episodeCount() > 1 && !gv.wad.isDoom2() ? S_EPI : S_MAIN; break;
             case S_SND: scr = S_OPT; break;
+            case S_JVV: case S_JVC: case S_JVG: case S_JVX: case S_JVP: scr = S_JV; break;
             case S_QUIT: case S_END: scr = prev; break;
             default: scr = S_MAIN;
         }
@@ -78,8 +92,17 @@ public final class Menu {
         switch (scr) {
             case S_MAIN:
                 ax = 97; ay = 64;
-                add(1, "M_NGAME", null, 0); add(2, "M_OPTION", null, 0); add(3, null, "JVDOOM SETUP", 0);
+                add(1, "M_NGAME", null, 0); add(2, "M_OPTION", null, 0); add(6, "M_LOADG", null, 0); add(7, "M_SAVEG", null, 0);
+                add(3, null, "JVDOOM SETUP", 0);
                 add(4, "M_RDTHIS", null, 0); add(5, "M_QUITG", null, 0);
+                break;
+            case S_LOAD: case S_SAVE:
+                ax = 44; ay = 46;
+                if (scr == S_SAVE && !gv.canSave()) { add(0, null, "NO GAME TO SAVE", 0); break; }
+                for (int i = 0; i < SaveGame.SLOTS; i++) {
+                    String d = SaveGame.describe(gv.getContext(), i);
+                    add(100 + i, null, (i + 1) + " " + (d != null ? d : "EMPTY"), 0);
+                }
                 break;
             case S_EPI:
                 ax = 48; ay = 63;
@@ -98,17 +121,60 @@ public final class Menu {
             case S_SND:
                 ax = 80; ay = 64;
                 add(40, "M_SFXVOL", null, 16);
+                add(41, "M_MUSVOL", null, 16);
                 break;
             case S_JV:
                 ax = 44; ay = 34;
+                add(58, null, "VIDEO >", 0);
+                add(75, null, "PICTURE >", 0);
+                add(59, null, "CONTROLS >", 0);
+                add(60, null, "GAMEPLAY >", 0);
+                add(61, null, "CHEATS >", 0);
+                add(68, null, "RESET SETTINGS", 0);
+                break;
+            case S_JVV:
+                ax = 44; ay = 34;
                 add(50, null, "RESOLUTION: " + RES_LABEL[gv.resIndex], 0);
+                add(76, null, "SCREEN: " + ASPECT_LABEL[gv.aspectIdx], 0);
                 add(51, null, "SMOOTHING: " + onOff(gv.smooth), 0);
-                add(52, null, "AIM ASSIST: " + onOff(gv.game.aimAssist), 0);
                 add(53, null, "FPS COUNTER: " + onOff(gv.showFps), 0);
+                add(64, null, "HUD INFO: " + INFO_LABEL[!gv.showStats ? (gv.showTime ? 3 : 0) : (gv.showTime ? 2 : 1)], 0);
+                add(63, null, "CROSSHAIR: " + XHAIR_LABEL[gv.crosshair], 0);
+                break;
+            case S_JVP:
+                ax = 44; ay = 34;
+                add(62, null, "BRIGHTNESS: " + BRIGHT_LABEL[gv.bright], 0);
+                add(69, null, "FOV: " + FOV_LABEL[gv.fovIdx], 0);
+                add(70, null, "FILTER: " + FILTER_LABEL[gv.filterIdx], 0);
+                break;
+            case S_JVC:
+                ax = 44; ay = 34;
+                add(52, null, "AIM ASSIST: " + onOff(gv.game.aimAssist), 0);
                 add(54, null, "BAR SIZE: " + SIZE_LABEL[gv.hudSize], 0);
                 add(55, null, "BUTTON SIZE: " + SIZE_LABEL[gv.ctlSize], 0);
                 add(56, null, "BUTTON OPACITY: " + ALPHA_LABEL[gv.ctlAlpha], 0);
-                add(57, null, "MAP: " + gv.game.mapName + " >", 0);
+                add(65, null, "VIBRATION: " + onOff(gv.haptic), 0);
+                break;
+            case S_JVG:
+                ax = 44; ay = 34;
+                add(57, null, "NEXT MAP: " + gv.game.mapName + " >", 0);
+                add(67, null, "< PREVIOUS MAP", 0);
+                add(66, null, "RESTART LEVEL", 0);
+                add(71, null, "MOVE SPEED: " + SPEED_LABEL[gv.speedIdx], 0);
+                add(72, null, "DAMAGE TAKEN: " + TAKEN_LABEL[gv.takenIdx], 0);
+                add(73, null, "YOUR DAMAGE: " + DEALT_LABEL[gv.dealtIdx], 0);
+                add(74, null, "GAME SPEED: " + TEMPO_LABEL[gv.tempoIdx], 0);
+                break;
+            case S_JVX:
+                ax = 44; ay = 34;
+                add(80, null, "GOD MODE: " + onOff(gv.game.god), 0);
+                add(81, null, "NOCLIP: " + onOff(gv.game.noclip), 0);
+                add(82, null, "INFINITE AMMO: " + onOff(gv.game.infAmmo), 0);
+                add(83, null, "ALL WEAPONS AND AMMO", 0);
+                add(84, null, "ALL KEYS", 0);
+                add(85, null, "FULL HEALTH AND ARMOR", 0);
+                add(86, null, "KILL ALL MONSTERS", 0);
+                add(87, null, "NOTARGET: " + onOff(gv.game.noTarget), 0);
                 break;
             default:
         }
@@ -121,9 +187,27 @@ public final class Menu {
     static String onOff(boolean b) { return b ? "ON" : "OFF"; }
 
     // ------------------------------------------------------------------ actions
+    /** Save / load screens: tap a slot. */
+    void slotAction(int slot) {
+        if (scr == S_SAVE) {
+            boolean ok = gv.canSave() && SaveGame.save(gv, slot);
+            gv.closeMenu();
+            gv.game.msg(ok ? "GAME SAVED" : "SAVE FAILED");
+        } else {
+            if (SaveGame.describe(gv.getContext(), slot) == null) return;
+            boolean ok = SaveGame.load(gv, slot);
+            gv.closeMenu();
+            gv.game.msg(ok ? "GAME LOADED" : "LOAD FAILED");
+        }
+    }
+
     void activate(int id) {
         gv.beep("DSPISTOL");
+        if (id >= 100 && id < 100 + SaveGame.SLOTS) { slotAction(id - 100); return; }
         switch (id) {
+            case 0: back(); break;
+            case 6: goTo(S_LOAD); break;
+            case 7: goTo(S_SAVE); break;
             case 1:
                 if (gv.wad.isDoom2() || episodeCount() <= 1) { episode = firstEpisode(); sel[S_SKILL] = 2; goTo(S_SKILL); }
                 else goTo(S_EPI);
@@ -146,6 +230,36 @@ public final class Menu {
             case 55: gv.ctlSize = (gv.ctlSize + 1) % 3; gv.layoutButtons(); gv.savePrefs(); build(); break;
             case 56: gv.ctlAlpha = (gv.ctlAlpha + 1) % 3; gv.savePrefs(); build(); break;
             case 57: gv.warpNext(); break;
+            case 58: goTo(S_JVV); break;
+            case 59: goTo(S_JVC); break;
+            case 60: goTo(S_JVG); break;
+            case 61: goTo(S_JVX); break;
+            case 62: gv.bright = (gv.bright + 1) % 4; Renderer.boost = GameView.BOOST[gv.bright]; gv.savePrefs(); build(); break;
+            case 63: gv.crosshair = (gv.crosshair + 1) % 3; gv.savePrefs(); build(); break;
+            case 64: {
+                int cur = !gv.showStats ? (gv.showTime ? 3 : 0) : (gv.showTime ? 2 : 1), nx = (cur + 1) % 4;
+                gv.showStats = nx == 1 || nx == 2; gv.showTime = nx == 2 || nx == 3; gv.savePrefs(); build(); break;
+            }
+            case 65: gv.haptic = !gv.haptic; gv.savePrefs(); build(); break;
+            case 66: if (!gv.titleMode) { gv.restartLevel(); gv.closeMenu(); } break;
+            case 67: gv.warpPrev(); break;
+            case 68: gv.resetPrefs(); build(); break;
+            case 75: goTo(S_JVP); break;
+            case 76: gv.aspectIdx = (gv.aspectIdx + 1) % GameView.ASPECT_VAL.length; gv.relayout(); gv.savePrefs(); build(); break;
+            case 69: gv.fovIdx = (gv.fovIdx + 1) % 4; gv.savePrefs(); build(); break;
+            case 70: gv.filterIdx = (gv.filterIdx + 1) % 5; gv.savePrefs(); build(); break;
+            case 71: gv.speedIdx = (gv.speedIdx + 1) % 4; gv.savePrefs(); build(); break;
+            case 72: gv.takenIdx = (gv.takenIdx + 1) % 4; gv.savePrefs(); build(); break;
+            case 73: gv.dealtIdx = (gv.dealtIdx + 1) % 4; gv.savePrefs(); build(); break;
+            case 74: gv.tempoIdx = (gv.tempoIdx + 1) % 4; gv.savePrefs(); build(); break;
+            case 87: gv.game.noTarget = !gv.game.noTarget; build(); break;
+            case 80: gv.game.god = !gv.game.god; build(); break;
+            case 81: gv.game.noclip = !gv.game.noclip; build(); break;
+            case 82: gv.game.infAmmo = !gv.game.infAmmo; build(); break;
+            case 83: if (!gv.titleMode) { gv.game.cheatWeapons(); gv.closeMenu(); } break;
+            case 84: if (!gv.titleMode) { gv.game.cheatKeys(); gv.closeMenu(); } break;
+            case 85: if (!gv.titleMode) { gv.game.cheatHealth(); gv.closeMenu(); } break;
+            case 86: if (!gv.titleMode) { gv.game.cheatKillAll(); gv.closeMenu(); } break;
             default:
         }
     }
@@ -155,6 +269,7 @@ public final class Menu {
             case 33: return gv.screenBlocks - 3;
             case 34: return Math.max(0, Math.min(9, Math.round((gv.sens - 0.4f) / 0.2f)));
             case 40: return gv.sfxVol;
+            case 41: return gv.musVol;
             default: return 0;
         }
     }
@@ -164,6 +279,7 @@ public final class Menu {
             case 33: gv.screenBlocks = dot + 3; gv.relayout(); break;
             case 34: gv.sens = 0.4f + 0.2f * dot; break;
             case 40: gv.sfxVol = dot; gv.sound.volume = dot / 15f; break;
+            case 41: gv.musVol = dot; gv.music.setVolume(dot / 15f); break;
             default: return;
         }
         gv.savePrefs();
@@ -200,18 +316,25 @@ public final class Menu {
         if (scr == S_QUIT || scr == S_END) { drawConfirm(c); return; }
         switch (scr) {
             case S_MAIN: hud.patch(c, "M_DOOM", 94, 2); break;
+            case S_LOAD: hud.patch(c, "M_LOADG", 72, 28); break;
+            case S_SAVE: hud.patch(c, "M_SAVEG", 72, 28); break;
             case S_EPI: hud.patch(c, "M_NEWG", 96, 14); hud.patch(c, "M_EPISOD", 54, 38); break;
             case S_SKILL: hud.patch(c, "M_NEWG", 96, 14); hud.patch(c, "M_SKILL", 54, 38); break;
             case S_OPT: hud.patch(c, "M_OPTTTL", 108, 15); break;
             case S_SND: hud.patch(c, "M_SVOL", 60, 38); break;
-            case S_JV: hud.text(c, "JVDOOM SETUP", 160 - hud.textW("JVDOOM SETUP"), 8, 2f); break;
+            case S_JV: title(c, "JVDOOM SETUP"); break;
+            case S_JVV: title(c, "VIDEO"); break;
+            case S_JVC: title(c, "CONTROLS"); break;
+            case S_JVG: title(c, "GAMEPLAY"); break;
+            case S_JVX: title(c, "CHEATS"); break;
+            case S_JVP: title(c, "PICTURE"); break;
             default:
         }
         for (int i = 0; i < items.size(); i++) {
             It it = items.get(i);
             float y = itY[i];
             if (it.patch != null) hud.patch(c, it.patch, ax, y);
-            else hud.text(c, it.text, ax, y + (scr == S_JV ? 3 : 0), scr == S_JV ? 1.5f : 2f);
+            else hud.text(c, it.text, ax, y + (isJV(scr) ? 3 : 0), isJV(scr) ? 1.5f : 2f);
             if (it.id == 31) hud.patch(c, gv.messagesOn ? "M_MSGON" : "M_MSGOFF", ax + 120, y);
             if (it.id == 32) hud.patch(c, gv.lowDetail ? "M_GDLOW" : "M_GDHIGH", ax + 175, y);
             if (it.slider > 0) thermo(c, ax, y + 16, it.slider, sliderValue(it.id));
@@ -225,6 +348,8 @@ public final class Menu {
         String label = scr == S_MAIN ? (gv.titleMode ? "< CLOSE" : "< RESUME") : "< BACK";
         hud.text(c, label, 6, 184, 1.6f);
     }
+
+    void title(Canvas c, String t) { hud.text(c, t, 160 - hud.textW(t), 8, 2f); }
 
     boolean backHit(float vx, float vy) { return vx >= 0 && vx <= 80 && vy >= 178; }
 
@@ -279,7 +404,7 @@ public final class Menu {
             Gfx.Pic p = gv.gfx.patch(it.patch);
             if (p != null) r = ax - p.lo + p.w;
         } else if (it.text != null) {
-            r = ax + hud.textW(it.text) * (scr == S_JV ? 1.5f : 2f);
+            r = ax + hud.textW(it.text) * (isJV(scr) ? 1.5f : 2f);
         }
         if (it.id == 31) { Gfx.Pic p = gv.gfx.patch(gv.messagesOn ? "M_MSGON" : "M_MSGOFF"); if (p != null) r = Math.max(r, ax + 120 - p.lo + p.w); }
         if (it.id == 32) { Gfx.Pic p = gv.gfx.patch(gv.lowDetail ? "M_GDLOW" : "M_GDHIGH"); if (p != null) r = Math.max(r, ax + 175 - p.lo + p.w); }

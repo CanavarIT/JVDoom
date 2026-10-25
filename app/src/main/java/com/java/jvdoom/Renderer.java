@@ -12,8 +12,16 @@ import java.util.List;
 public final class Renderer {
     public final int W, H;
     public final int[] fb;
-    final float[] depth;
-    final float cx, cy, focal, focalY;
+    final float[] depth;                 // walls (and black fills): view-axis distance per pixel
+    final float[] fdepth;                // floors/ceilings: distance per pixel (sprites ignore it below their own feet)
+    final float[] colZ;                  // nearest fully closing wall per column: hides sprites/masked textures behind it
+    final float cx, cy;
+    float focal, focalY, zoom = 1f;
+    /** Setup menu: colour filter (0 off, 1 grey, 2 sepia, 3 night vision, 4 inferno) and invisible-weapon fuzz. */
+    static int filter = 0;
+    static boolean weaponFuzz = false;
+
+    void setZoom(float z) { zoom = z; focal = 0.8f * H * z; focalY = focal * VSTRETCH; }
     static final float NEAR = 1f, VSTRETCH = 1.2f;
 
     final Gfx gfx;
@@ -44,6 +52,8 @@ public final class Renderer {
         gfx = g; W = w; H = h;
         fb = new int[W * H];
         depth = new float[W * H];
+        fdepth = new float[W * H];
+        colZ = new float[W];
         cx = W / 2f; cy = H / 2f;
         focal = 0.8f * H;
         focalY = focal * VSTRETCH;
@@ -59,11 +69,21 @@ public final class Renderer {
 
     public void setLevel(Level l, Gfx.Pic skyPic) { L = l; sky = skyPic; }
 
+    /** Extra brightness from the setup menu, in colormap steps. */
+    static int boost = 0;
+
     static int shadeLevel(int lightnum, float z) {
         if (lightnum < 0) lightnum = 0; else if (lightnum > 15) lightnum = 15;
         int j = (int) (2560f / z);
         if (j > 47) j = 47;
-        int lvl = (15 - lightnum) * 4 - (j >> 1);
+        int lvl = (15 - lightnum) * 4 - (j >> 1) - boost;
+        return lvl < 0 ? 0 : (lvl > 31 ? 31 : lvl);
+    }
+
+    /** Original R_DrawPSprite: weapon lit with the brightest scalelight slot (j = 47). */
+    static int weaponShade(int lightnum) {
+        if (lightnum < 0) lightnum = 0; else if (lightnum > 15) lightnum = 15;
+        int lvl = (15 - lightnum) * 4 - 23;
         return lvl < 0 ? 0 : (lvl > 31 ? 31 : lvl);
     }
 
@@ -75,6 +95,8 @@ public final class Renderer {
         cosA = (float) Math.cos(angle); sinA = (float) Math.sin(angle);
         Arrays.fill(fb, 0xFF000000);
         Arrays.fill(depth, Float.MAX_VALUE);
+        Arrays.fill(fdepth, Float.MAX_VALUE);
+        Arrays.fill(colZ, Float.MAX_VALUE);
         Arrays.fill(top, 0); Arrays.fill(bot, H - 1); Arrays.fill(closed, false);
         closedCount = 0;
         masked.clear(); drawables.clear();
@@ -239,12 +261,14 @@ public final class Renderer {
                 if (ce >= tp) {
                     if (ceilSky) drawSkyColumn(x, tp, ce);
                     else if (ceilPic != null && ceilHd > 0.01f) drawFlatColumn(x, tp, ce, ceilPic, ceilHd, planeLight, false);
+                    else if (ceilPic == null) fillPlain(x, tp, ce, 0xFF202020);
                 }
             }
             // floor
             if (drawFloor) {
                 int fst = Math.max(yb + 1, tp);
                 if (fst <= bt && floorPic != null && floorHd > 0.01f) drawFlatColumn(x, fst, bt, floorPic, floorHd, planeLight, true);
+                else if (fst <= bt && floorPic == null) fillPlain(x, fst, bt, 0xFF202020);
             }
 
             int lvl = fixedLevel >= 0 ? fixedLevel : shadeLevel(lightnum, z);
@@ -257,7 +281,7 @@ public final class Renderer {
                     drawWallColumn(x, y0, y1, midTex, uCol, vtopMid - vz + side.yoff, z, lt, yt);
                 else if (y0 <= y1) fillColumn(x, y0, y1, z, 0xFF000000);
                 top[x] = H; bot[x] = -1;
-                closed[x] = true; closedCount++;
+                closed[x] = true; closedCount++; colZ[x] = z;
             } else {
                 int newTop = tp, newBot = bt;
                 if (drawUpper) {
@@ -285,10 +309,10 @@ public final class Renderer {
                     newBot = Math.min(bt, yb);
                 }
                 if (isClosed) {
-                    top[x] = H; bot[x] = -1; closed[x] = true; closedCount++;
+                    top[x] = H; bot[x] = -1; closed[x] = true; closedCount++; colZ[x] = z;
                 } else {
                     top[x] = newTop; bot[x] = newBot;
-                    if (newTop > newBot) { closed[x] = true; closedCount++; }
+                    if (newTop > newBot) { closed[x] = true; closedCount++; colZ[x] = z; }
                 }
             }
         }
@@ -317,6 +341,12 @@ public final class Renderer {
         }
     }
 
+    /** Never leave a hole: a plane whose flat is missing is painted dark grey. */
+    void fillPlain(int x, int y0, int y1, int color) {
+        int idx = y0 * W + x;
+        for (int y = y0; y <= y1; y++) { fb[idx] = color; idx += W; }
+    }
+
     void fillColumn(int x, int y0, int y1, float z, int color) {
         int idx = y0 * W + x;
         for (int y = y0; y <= y1; y++) { fb[idx] = color; depth[idx] = z; idx += W; }
@@ -338,11 +368,11 @@ public final class Renderer {
             else {
                 int j = (int) (k * absDy[y]);
                 if (j > 47) j = 47;
-                lvl = start - (j >> 1);
+                lvl = start - (j >> 1) - boost;
                 if (lvl < 0) lvl = 0; else if (lvl > 31) lvl = 31;
             }
             fb[idx] = gfx.lit[lvl][flat[(ty << 6) | tx] & 255];
-            depth[idx] = z;
+            fdepth[idx] = z;
             idx += W;
         }
     }
@@ -428,7 +458,15 @@ public final class Renderer {
         float zt = z - 0.5f;
         boolean fuzz = m.fuzz;
         int ph = p.h;
+        float feetF = cy - (izz(m) - vz) * scY;               // screen row of the sprite's ground contact
+        int feetRow = (int) Math.ceil(feetF - 0.5f);
+        // Rows of the sprite that sink below its origin are only drawn over floor that is about as far as the sprite
+        // itself. Without this test they poked out below walls and ledges that hide the rest of the sprite.
+        float sinkPx = Math.max(0, p.h - p.to) * scY;
+        float dyFeet = feetF - cy;
+        float minRatio = dyFeet > 1f ? 0.93f * dyFeet / (dyFeet + sinkPx + 1f) : 0f;
         for (int x = x0; x <= x1; x++) {
+            if (zt >= colZ[x]) continue;                       // behind a wall that closes this column completely
             int tc = (int) ((x + 0.5f - left) * invSc);
             if (tc < 0) tc = 0; else if (tc >= p.w) tc = p.w - 1;
             if (flip) tc = p.w - 1 - tc;
@@ -439,7 +477,7 @@ public final class Renderer {
                 int r = (int) v;
                 if (r >= ph) r = ph - 1;
                 v += invScY;
-                if (p.op[base + r] != 0 && zt < depth[idx]) {
+                if (p.op[base + r] != 0 && zt < depth[idx] && (y >= feetRow ? fdepth[idx] >= minRatio * z : zt < fdepth[idx])) {
                     if (fuzz) {
                         int sidx = idx + (((x + y + frameCount) & 1) == 0 ? W : -W);
                         if (sidx < 0 || sidx >= fb.length) sidx = idx;
@@ -475,6 +513,7 @@ public final class Renderer {
             int y0 = Math.max(0, (int) Math.ceil(cy - (zTop - vz) * scY - 0.5f));
             int y1 = Math.min(H - 1, (int) Math.ceil(cy - (zBot - vz) * scY - 0.5f) - 1);
             if (y0 > y1) continue;
+            if (z - 0.5f >= colZ[x]) continue;                // hidden behind a closing wall
             int lvl = fixedLevel >= 0 ? fixedLevel : shadeLevel(m.lightnum, z);
             int[] lt = gfx.lit[lvl];
             float stepY = z / focalY;
@@ -485,7 +524,7 @@ public final class Renderer {
             for (int y = y0; y <= y1; y++) {
                 int r = (int) Math.floor(rowF);
                 rowF += stepY;
-                if (r >= 0 && r < tex.h && (tex.op == null || tex.op[base + r] != 0) && zt < depth[idx])
+                if (r >= 0 && r < tex.h && (tex.op == null || tex.op[base + r] != 0) && zt < depth[idx] && zt < fdepth[idx])
                     fb[idx] = lt[tex.pix[base + r] & 255];
                 idx += W;
             }
@@ -497,6 +536,25 @@ public final class Renderer {
         float s = H / 240f;
         if (wpn != null) drawPsprite(wpn, wf, psx, psy, s, false, light);
         if (flash != null) drawPsprite(flash, ff, psx, psy, s, true, light);
+        if (filter != 0) applyFilter();
+    }
+
+    /** Whole-screen colour grading from the setup menu. */
+    void applyFilter() {
+        final int mode = filter;
+        for (int i = 0, n = fb.length; i < n; i++) {
+            int c = fb[i];
+            int rr = (c >> 16) & 255, gg = (c >> 8) & 255, bb = c & 255;
+            int l = (rr * 77 + gg * 151 + bb * 28) >> 8;
+            int or, og, ob;
+            switch (mode) {
+                case 1: or = og = ob = l; break;
+                case 2: or = Math.min(255, l * 9 / 8); og = l * 7 / 8; ob = l * 5 / 8; break;
+                case 3: { int g2 = Math.min(255, l * 3 / 2 + 12); or = l / 6; og = g2; ob = l / 5; break; }
+                default: or = Math.min(255, l * 5 / 4); og = l / 4; ob = l / 5; break;
+            }
+            fb[i] = 0xFF000000 | (or << 16) | (og << 8) | ob;
+        }
     }
 
     void drawPsprite(Gfx.SpriteSet ss, int f, float psx, float psy, float s, boolean bright, int light) {
@@ -510,7 +568,7 @@ public final class Renderer {
         int x0 = Math.max(0, (int) Math.ceil(left - 0.5f)), x1 = Math.min(W - 1, (int) Math.ceil(right - 0.5f) - 1);
         int y0 = Math.max(0, (int) Math.ceil(topS - 0.5f)), y1 = Math.min(H - 1, (int) Math.ceil(botS - 0.5f) - 1);
         if (x0 > x1 || y0 > y1) return;
-        int lvl = fixedLevel >= 0 ? fixedLevel : (bright ? 0 : shadeLevel(light >> 4, 1000f));
+        int lvl = fixedLevel >= 0 ? fixedLevel : (bright ? 0 : Math.min(weaponShade(light >> 4), 24));
         int[] lt = gfx.lit[lvl];
         for (int x = x0; x <= x1; x++) {
             int tc = (int) ((x + 0.5f - left) / sh);
@@ -520,7 +578,14 @@ public final class Renderer {
             for (int y = y0; y <= y1; y++) {
                 int r = (int) ((y + 0.5f - topS) / sv);
                 if (r >= p.h) r = p.h - 1;
-                if (p.op[base + r] != 0) fb[idx] = lt[p.pix[base + r] & 255];
+                if (p.op[base + r] != 0) {
+                    if (weaponFuzz) {
+                        int sidx = idx + (((x + y + frameCount) & 1) == 0 ? W : -W);
+                        if (sidx < 0 || sidx >= fb.length) sidx = idx;
+                        int c = fb[sidx];
+                        fb[idx] = 0xFF000000 | (((c >> 1) & 0x7F7F7F) + ((c >> 3) & 0x1F1F1F));
+                    } else fb[idx] = lt[p.pix[base + r] & 255];
+                }
                 idx += W;
             }
         }

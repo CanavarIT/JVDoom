@@ -64,6 +64,8 @@ public final class Game {
     public final boolean[] keys = new boolean[3];
     public int weapon = W_PISTOL, pending = -1;
     public int invuln, invis, suit, light;
+    public boolean god, noclip, infAmmo, noTarget;
+    public float speedMul = 1f, takenMul = 1f, dealtMul = 1f;     // setup menu: move speed, damage taken, damage dealt     // cheats from the setup menu
     public boolean berserk, hasMap, backpack;
     public int kills, items, secrets, totalKills, totalItems, totalSecrets, levelTics;
     public int damageFlash, bonusFlash;
@@ -95,6 +97,25 @@ public final class Game {
     public void setRenderer(Renderer r) {
         rend = r;
         if (L != null) rend.setLevel(L, gfx.texture(skyFor(mapName)));
+    }
+
+    // ---- cheats (setup menu)
+    public void cheatWeapons() {
+        for (int w = 0; w < 9; w++) if (gfx.sprites.containsKey(W_SPR[w])) owned[w] = true;
+        if (!backpack) { backpack = true; for (int i = 0; i < 4; i++) maxAmmo[i] *= 2; }
+        for (int i = 0; i < 4; i++) ammo[i] = maxAmmo[i];
+        msg("All weapons and full ammo");
+    }
+    public void cheatKeys() { keys[0] = keys[1] = keys[2] = true; msg("All keys"); }
+    public void cheatHealth() { health = 100; pl.health = 100; armor = 200; armorType = 2; msg("Full health and armor"); }
+    public void cheatKillAll() {
+        int n = 0;
+        for (int i = 0, c = mobjs.size(); i < c; i++) {
+            Mobj m = mobjs.get(i);
+            if (m == pl || m.def == null || !m.shootable || m.removed) continue;
+            damage(m, pl, pl, 10000); n++;
+        }
+        msg("Monsters killed: " + n);
     }
 
     public void msg(String s) { message = s; msgTics = 105; }
@@ -308,6 +329,11 @@ public final class Game {
 
     // ================================================================== player
     void refreshFloor(Mobj m) {
+        if (noclip && m == pl) {
+            m.sector = L.sectorAt(m.x, m.y);
+            m.floorz = m.sector.floor; m.ceilz = m.sector.ceil;
+            return;
+        }
         phys.checkPosition(m, m.x, m.y, true);
         m.floorz = phys.tmFloor; m.ceilz = phys.tmCeil;
         m.sector = L.sectorAt(m.x, m.y);
@@ -322,11 +348,12 @@ public final class Game {
             m.z = m.floorz; m.mz = 0;
         }
         if (m.z + m.height > m.ceilz) { m.z = m.ceilz - m.height; if (m.mz > 0) m.mz = 0; }
+        if (m.z < m.floorz) m.z = m.floorz;     // never sink below the floor when squeezed
     }
 
     void playerThink() {
         refreshFloor(pl);
-        float fwd = inMove * 50f, side = inStrafe * 40f;
+        float fwd = inMove * 50f * speedMul, side = inStrafe * 40f * speedMul;
         if (pl.z <= pl.floorz + 0.01f) {
             float c = (float) Math.cos(angle), s = (float) Math.sin(angle);
             pl.mx += (c * fwd + s * side) / 32f;
@@ -336,7 +363,8 @@ public final class Game {
         bob = Math.min(16f, spd2 / 4f);
         float fr = 0.90625f;
         float steps = Math.max(1, (float) Math.ceil(Math.max(Math.abs(pl.mx), Math.abs(pl.my)) / 12f));
-        for (int i = 0; i < steps; i++) phys.slideMove(pl, pl.mx / steps, pl.my / steps);
+        if (noclip) { pl.x += pl.mx; pl.y += pl.my; }
+        else for (int i = 0; i < steps; i++) phys.slideMove(pl, pl.mx / steps, pl.my / steps);
         if (pl.z <= pl.floorz + 0.01f) { pl.mx *= fr; pl.my *= fr; }
         if (Math.abs(pl.mx) < 0.06f && Math.abs(pl.my) < 0.06f && fwd == 0 && side == 0) { pl.mx = 0; pl.my = 0; }
         gravity(pl);
@@ -586,7 +614,7 @@ public final class Game {
 
     void fireWeapon() {
         int w = weapon;
-        if (W_AMMO[w] >= 0) ammo[W_AMMO[w]] -= W_USE[w];
+        if (W_AMMO[w] >= 0 && !infAmmo) ammo[W_AMMO[w]] -= W_USE[w];
         noiseAlert();
         switch (w) {
             case W_FIST: case W_SAW: {
@@ -707,6 +735,8 @@ public final class Game {
     // ================================================================== damage
     public void damage(Mobj t, Mobj inflictor, Mobj source, int amount) {
         if (!t.shootable || amount <= 0) return;
+        if (t == pl) { if (takenMul <= 0f) return; amount = Math.max(1, Math.round(amount * takenMul)); }
+        else if (inflictor == pl || source == pl) amount = Math.max(1, Math.round(amount * dealtMul));
         if (inflictor != null && inflictor != t && (t.kind == Mobj.MONSTER || t.kind == Mobj.PLAYER)) {
             float a = (float) Math.atan2(t.y - inflictor.y, t.x - inflictor.x);
             int mass = t.def != null ? t.def.mass : 100;
@@ -715,7 +745,7 @@ public final class Game {
             t.mx += (float) Math.cos(a) * th; t.my += (float) Math.sin(a) * th;
         }
         if (t == pl) {
-            if (invuln > 0) return;
+            if (invuln > 0 || god) return;
             if (armorType > 0) {
                 int saved = armorType == 1 ? amount / 3 : amount / 2;
                 if (armor <= saved) saved = armor;
@@ -770,6 +800,7 @@ public final class Game {
             }
         }
         int fixed = invuln > 0 ? 32 : (light > 0 ? 1 : -1);
+        Renderer.weaponFuzz = invis > 4 * 32 || (invis & 8) != 0;
         rend.render(px, py, ez, angle, mobjs, pl, ws, wf, fs, ff, psx, psy, pl.sector != null ? pl.sector.light : 160, fixed);
     }
 

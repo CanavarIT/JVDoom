@@ -62,7 +62,7 @@ public final class Level {
         public int wait, waitMax;
         public float home;
         public boolean useCeil;
-        public boolean once;
+        public boolean once, reopen, reopenWait;
         public Line triggerLine;
     }
 

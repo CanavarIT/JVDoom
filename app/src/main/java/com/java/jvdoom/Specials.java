@@ -9,7 +9,7 @@ import java.util.Map;
 public final class Specials {
     static final int TR_WALK = 0, TR_SWITCH = 1, TR_GUN = 2, TR_DOOR = 3;
     static final int A_DOOR_OWC = 1, A_DOOR_STAY = 2, A_DOOR_CLOSE = 3, A_LIFT = 4, A_FLOOR = 5, A_CEIL = 6, A_EXIT = 7,
-            A_SECRET = 8, A_TELE = 9, A_LIGHT = 10, A_STAIRS = 11, A_SCROLL = 12;
+            A_SECRET = 8, A_TELE = 9, A_LIGHT = 10, A_STAIRS = 11, A_SCROLL = 12, A_DOOR_CLOSE30 = 13;
     // floor params
     static final int F_RAISE_CEIL = 1, F_RAISE_NEXT = 2, F_LOWER_LOWEST = 3, F_LOWER_HIGHEST = 4, F_LOWER_8 = 5,
             F_RAISE_24 = 6, F_RAISE_TEX = 7, F_RAISE_32 = 8;
@@ -30,9 +30,9 @@ public final class Specials {
         sp(117, TR_DOOR, 1, A_DOOR_OWC, 0, 0, 1); sp(118, TR_DOOR, 0, A_DOOR_STAY, 0, 0, 1);
         // tagged doors
         sp(2, TR_WALK, 0, A_DOOR_STAY, 0, 0, 0); sp(3, TR_WALK, 0, A_DOOR_CLOSE, 0, 0, 0); sp(4, TR_WALK, 0, A_DOOR_OWC, 0, 0, 0);
-        sp(16, TR_WALK, 0, A_DOOR_CLOSE, 0, 0, 0); sp(108, TR_WALK, 0, A_DOOR_OWC, 0, 0, 1); sp(109, TR_WALK, 0, A_DOOR_STAY, 0, 0, 1);
+        sp(16, TR_WALK, 0, A_DOOR_CLOSE30, 0, 0, 0); sp(108, TR_WALK, 0, A_DOOR_OWC, 0, 0, 1); sp(109, TR_WALK, 0, A_DOOR_STAY, 0, 0, 1);
         sp(110, TR_WALK, 0, A_DOOR_CLOSE, 0, 0, 1);
-        sp(75, TR_WALK, 1, A_DOOR_CLOSE, 0, 0, 0); sp(76, TR_WALK, 1, A_DOOR_CLOSE, 0, 0, 0); sp(86, TR_WALK, 1, A_DOOR_STAY, 0, 0, 0);
+        sp(75, TR_WALK, 1, A_DOOR_CLOSE, 0, 0, 0); sp(76, TR_WALK, 1, A_DOOR_CLOSE30, 0, 0, 0); sp(86, TR_WALK, 1, A_DOOR_STAY, 0, 0, 0);
         sp(90, TR_WALK, 1, A_DOOR_OWC, 0, 0, 0); sp(105, TR_WALK, 1, A_DOOR_OWC, 0, 0, 1); sp(106, TR_WALK, 1, A_DOOR_STAY, 0, 0, 1);
         sp(107, TR_WALK, 1, A_DOOR_CLOSE, 0, 0, 1);
         sp(29, TR_SWITCH, 0, A_DOOR_OWC, 0, 0, 0); sp(50, TR_SWITCH, 0, A_DOOR_CLOSE, 0, 0, 0); sp(103, TR_SWITCH, 0, A_DOOR_STAY, 0, 0, 0);
@@ -52,7 +52,7 @@ public final class Specials {
         sp(37, TR_WALK, 0, A_FLOOR, F_LOWER_LOWEST, 0, 0); sp(38, TR_WALK, 0, A_FLOOR, F_LOWER_LOWEST, 0, 0);
         sp(56, TR_WALK, 0, A_FLOOR, F_RAISE_CEIL, 0, 0); sp(58, TR_WALK, 0, A_FLOOR, F_RAISE_24, 0, 0);
         sp(59, TR_WALK, 0, A_FLOOR, F_RAISE_24, 0, 0); sp(119, TR_WALK, 0, A_FLOOR, F_RAISE_NEXT, 0, 0);
-        sp(22, TR_WALK, 0, A_FLOOR, F_RAISE_NEXT, 0, 0);
+        sp(22, TR_WALK, 0, A_FLOOR, F_RAISE_NEXT, 0, 0); sp(47, TR_GUN, 0, A_FLOOR, F_RAISE_NEXT, 0, 0);
         sp(18, TR_SWITCH, 0, A_FLOOR, F_RAISE_NEXT, 0, 0); sp(20, TR_SWITCH, 0, A_FLOOR, F_RAISE_NEXT, 0, 0);
         sp(23, TR_SWITCH, 0, A_FLOOR, F_LOWER_LOWEST, 0, 0); sp(55, TR_SWITCH, 0, A_FLOOR, F_RAISE_CEIL, 0, 0);
         sp(71, TR_SWITCH, 0, A_FLOOR, F_LOWER_8, 0, 1); sp(101, TR_SWITCH, 0, A_FLOOR, F_RAISE_CEIL, 0, 0);
@@ -215,13 +215,29 @@ public final class Specials {
     }
 
     // ================================================================== movers
+    /** True when the mobj's body touches the sector (centre inside, or closer to one of its lines than its radius). */
+    boolean overlaps(Mobj m, Level.Sector s) {
+        if (m.sector == s) return true;
+        float r = m.radius;
+        for (Level.Line l : s.lines) {
+            if (m.x < l.minx - r || m.x > l.maxx + r || m.y < l.miny - r || m.y > l.maxy + r) continue;
+            float ex = l.x2 - l.x1, ey = l.y2 - l.y1;
+            float len2 = ex * ex + ey * ey;
+            float t = len2 <= 0 ? 0 : ((m.x - l.x1) * ex + (m.y - l.y1) * ey) / len2;
+            if (t < 0) t = 0; else if (t > 1) t = 1;
+            float px = l.x1 + ex * t - m.x, py = l.y1 + ey * t - m.y;
+            if (px * px + py * py < r * r) return true;
+        }
+        return false;
+    }
+
     boolean blockedBy(Level.Sector s) {
         float gap = s.ceil - s.floor;
         for (int i = 0, n = g.mobjs.size(); i < n; i++) {
             Mobj m = g.mobjs.get(i);
             if (m.removed || !m.solid || !m.shootable) continue;
-            if (m.sector != s) continue;
-            if (m.height > gap) return true;
+            if (m.height <= gap) continue;
+            if (overlaps(m, s)) return true;
         }
         return false;
     }
@@ -235,26 +251,40 @@ public final class Specials {
                     s.ceil += m.speed;
                     if (s.ceil >= m.target) { s.ceil = m.target; if (m.once) return true; m.state = 1; m.wait = m.waitMax; }
                 } else if (m.state == 1) {
-                    if (--m.wait <= 0) { m.state = 2; g.sndAt(m.speed > 4 ? "DSBDCLS" : "DSDORCLS", s.cx, s.cy); }
+                    if (--m.wait <= 0) {
+                        if (m.reopenWait) {           // "close for 30 seconds, then open" finished waiting
+                            m.reopenWait = false; m.state = 0; m.once = true;
+                            m.target = lowestNeighborCeil(s) - 4;
+                            g.sndAt(m.speed > 4 ? "DSBDOPN" : "DSDOROPN", s.cx, s.cy);
+                        } else { m.state = 2; g.sndAt(m.speed > 4 ? "DSBDCLS" : "DSDORCLS", s.cx, s.cy); }
+                    }
                 } else {
                     float prev = s.ceil;
                     s.ceil -= m.speed;
-                    if (blockedBy(s)) { s.ceil = prev; m.state = 0; g.sndAt(m.speed > 4 ? "DSBDOPN" : "DSDOROPN", s.cx, s.cy); break; }
-                    if (s.ceil <= m.home) { s.ceil = m.home; return true; }
+                    if (blockedBy(s)) { s.ceil = prev; m.state = 0; m.reopen = false; g.sndAt(m.speed > 4 ? "DSBDOPN" : "DSDOROPN", s.cx, s.cy); break; }
+                    if (s.ceil <= m.home) {
+                        s.ceil = m.home;
+                        if (m.reopen) { m.reopen = false; m.reopenWait = true; m.state = 1; m.wait = 30 * 35; return false; }
+                        return true;
+                    }
                 }
                 return false;
             }
             case 1: { // lift
                 if (m.state == 0) {
+                    float of = s.floor;
                     s.floor -= m.speed;
                     if (s.floor <= m.target) { s.floor = m.target; m.state = 1; m.wait = m.waitMax; g.sndAt("DSPSTOP", s.cx, s.cy); }
+                    settleThings(s, of);
                 } else if (m.state == 1) {
                     if (--m.wait <= 0) { m.state = 2; g.sndAt("DSPSTART", s.cx, s.cy); }
                 } else {
                     float prev = s.floor;
                     s.floor += m.speed;
                     if (blockedBy(s)) { s.floor = prev; m.state = 0; break; }
-                    if (s.floor >= m.home) { s.floor = m.home; g.sndAt("DSPSTOP", s.cx, s.cy); return true; }
+                    if (s.floor >= m.home) s.floor = m.home;
+                    settleThings(s, prev);
+                    if (s.floor >= m.home) { g.sndAt("DSPSTOP", s.cx, s.cy); return true; }
                 }
                 return false;
             }
@@ -262,6 +292,7 @@ public final class Specials {
                 float prev = s.floor;
                 if (m.target > s.floor) { s.floor = Math.min(m.target, s.floor + m.speed); if (blockedBy(s)) { s.floor = prev; return false; } }
                 else s.floor = Math.max(m.target, s.floor - m.speed);
+                settleThings(s, prev);
                 if (s.floor == m.target) { g.sndAt("DSPSTOP", s.cx, s.cy); return true; }
                 return false;
             }
@@ -274,6 +305,22 @@ public final class Specials {
             }
         }
         return false;
+    }
+
+    /** Things standing on a sector's floor follow it up and down (P_ThingHeightClip). */
+    void settleThings(Level.Sector s, float oldFloor) {
+        float nf = s.floor;
+        if (nf == oldFloor) return;
+        for (int i = 0, n = g.mobjs.size(); i < n; i++) {
+            Mobj m = g.mobjs.get(i);
+            if (m.removed || m.noGravity || m == g.pl) continue;
+            if (m.kind == Mobj.MISSILE || m.kind == Mobj.EFFECT || m.kind == Mobj.PLAYER) continue;
+            boolean onIt = Math.abs(m.z - oldFloor) < 0.5f || m.z < nf;
+            if (!onIt) continue;
+            Level.Sector ms = m.sector != null ? m.sector : g.L.sectorAt(m.x, m.y);
+            if (ms != s && g.L.sectorAt(m.x, m.y) != s) continue;
+            m.z = nf; m.oz = nf; m.floorz = nf;
+        }
     }
 
     Level.Mover newMover(Level.Sector s, int kind) {
@@ -314,7 +361,8 @@ public final class Specials {
         Level.Mover m = newMover(s, 0);
         m.speed = fast ? 8 : 2; m.waitMax = 150; m.home = s.floor;
         m.target = lowestNeighborCeil(s) - 4;
-        if (action == A_DOOR_CLOSE) { m.state = 2; g.sndAt(fast ? "DSBDCLS" : "DSDORCLS", s.cx, s.cy); }
+        if (action == A_DOOR_CLOSE30) { m.state = 2; m.reopen = true; g.sndAt(fast ? "DSBDCLS" : "DSDORCLS", s.cx, s.cy); }
+        else if (action == A_DOOR_CLOSE) { m.state = 2; g.sndAt(fast ? "DSBDCLS" : "DSDORCLS", s.cx, s.cy); }
         else {
             m.state = 0; m.once = action == A_DOOR_STAY;
             g.sndAt(fast ? "DSBDOPN" : "DSDOROPN", s.cx, s.cy);
@@ -329,6 +377,30 @@ public final class Specials {
         m.target = lowestNeighborFloor(s);
         g.sndAt("DSPSTART", s.cx, s.cy);
         return true;
+    }
+
+    /** Line specials whose floor move also changes the sector's flat / type (damage). 1 = flat only, 2 = flat + type copied, 3 = flat copied, type cleared ("no more damage"). */
+    static final Map<Integer, Integer> FLOOR_CHANGE = new HashMap<>();
+    static {
+        for (int n : new int[]{14, 15, 66, 67}) FLOOR_CHANGE.put(n, 1);
+        for (int n : new int[]{59, 93}) FLOOR_CHANGE.put(n, 2);
+        for (int n : new int[]{20, 22, 47, 68, 95}) FLOOR_CHANGE.put(n, 3);
+    }
+    Level.Line curLine;
+
+    void applyFloorChange(Level.Sector s) {
+        if (curLine == null || curLine.fs == null) return;
+        Integer mode = FLOOR_CHANGE.get(curLine.special);
+        if (mode == null) return;
+        Level.Sector m = curLine.fs;
+        s.floorPic = m.floorPic; s.floorName = m.floorName;
+        if (mode == 2) s.special = m.special;
+        else if (mode == 3) s.special = 0;
+        // stop the flat animation from restoring the old flat
+        for (java.util.Iterator<Object[]> it = flatUsers.iterator(); it.hasNext(); ) {
+            Object[] u = it.next();
+            if (u[0] == s && (Boolean) u[1]) it.remove();
+        }
     }
 
     boolean startFloor(Level.Sector s, int type, boolean fast) {
@@ -354,6 +426,7 @@ public final class Specials {
         if (t == s.floor) return false;
         Level.Mover m = newMover(s, 2);
         m.target = t; m.speed = fast ? 4 : 1;
+        applyFloorChange(s);
         g.sndAt("DSSTNMOV", s.cx, s.cy);
         return true;
     }
@@ -411,6 +484,7 @@ public final class Specials {
         boolean ok = false;
         int act = sp[2], prm = sp[3];
         boolean fast = sp[5] != 0;
+        curLine = l;
         switch (act) {
             case A_EXIT: if (who == g.pl) { g.exitLevel(false); ok = true; } break;
             case A_SECRET: if (who == g.pl) { g.exitLevel(true); ok = true; } break;
@@ -422,7 +496,7 @@ public final class Specials {
                     if (sp[0] == TR_DOOR) continue;
                     if (s.tag != l.tag) continue;
                     switch (act) {
-                        case A_DOOR_OWC: case A_DOOR_STAY: case A_DOOR_CLOSE: ok |= startDoor(s, act, fast); break;
+                        case A_DOOR_OWC: case A_DOOR_STAY: case A_DOOR_CLOSE: case A_DOOR_CLOSE30: ok |= startDoor(s, act, fast); break;
                         case A_LIFT: ok |= startLift(s, fast); break;
                         case A_FLOOR: ok |= startFloor(s, prm, fast); break;
                         case A_CEIL: ok |= startCeil(s, prm); break;

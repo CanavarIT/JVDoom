@@ -166,7 +166,7 @@ public final class Gfx {
                 boolean holes = false;
                 for (byte c : cov) if (c == 0) { holes = true; break; }
                 tx.op = holes ? cov : null;
-                textures.put(name, tx);
+                textures.putIfAbsent(name, tx);          // like vanilla: the first texture with a given name wins
             }
         }
     }

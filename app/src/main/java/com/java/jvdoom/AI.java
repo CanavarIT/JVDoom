@@ -22,6 +22,7 @@ public final class AI {
         Monsters.Seq q = seq(m.def, s);
         if (q == null) q = m.def.stand;
         m.seq = s; m.step = step;
+        if (s == Monsters.SEQ_ATTACK) faceTarget(m);      // A_FaceTarget on the first attack frame
         enterStep(m, q, false);
     }
 
@@ -36,8 +37,8 @@ public final class AI {
             case Monsters.SEQ_STAND: look(m); break;
             case Monsters.SEQ_WALK: chase(m); break;
             case Monsters.SEQ_ATTACK:
-                if (m.step == 0) faceTarget(m);
                 if (((q.events >> m.step) & 1) != 0) attack(m);
+                else faceTarget(m);                           // keep facing the player until the shot
                 break;
             default:
         }
@@ -77,6 +78,7 @@ public final class AI {
 
     // ------------------------------------------------------------------ look
     void look(Mobj m) {
+        if (g.noTarget) return;
         if (m.target != null) { wake(m); return; }
         Mobj p = g.pl;
         if (g.state != Game.ST_PLAY || !p.shootable) return;
@@ -138,6 +140,7 @@ public final class AI {
     }
 
     void chase(Mobj m) {
+        if (g.noTarget && m.target == g.pl) { m.target = null; setSeq(m, Monsters.SEQ_STAND, 0); return; }
         if (m.reaction > 0) m.reaction--;
         if (m.threshold > 0) { if (m.target == null || !m.target.shootable) m.threshold = 0; else m.threshold--; }
         if (m.moveDir < 8) m.angle = approach(m.angle, m.moveDir * (float) (Math.PI / 4), (float) (Math.PI / 4));
@@ -314,6 +317,7 @@ public final class AI {
         t.fuzz = false;
         if (t.def.fly) t.noGravity = false;
         if (t.countKill) g.kills++;
+        bossDeath(t);
         g.snd(t.def.deathSnd, t);
         setSeq(t, Monsters.SEQ_DIE, 0);
         if (t.def.drop != 0) {
@@ -321,6 +325,49 @@ public final class AI {
             th.x = t.x; th.y = t.y; th.type = t.def.drop; th.flags = 7;
             Mobj item = g.spawnThing(th);
             if (item != null) { g.mobjs.remove(item); if (item.countItem) g.totalItems--; item.countItem = false; g.spawnQueue.add(item); item.z = t.z; }
+        }
+    }
+
+    /** Original A_BossDeath: when the level's boss type is wiped out, tag 666 / 667 sectors open the way (or the episode ends). */
+    void bossDeath(Mobj t) {
+        if (g.health <= 0) return;
+        int need;
+        boolean d2 = g.wad.isDoom2();
+        String m = g.mapName;
+        if (d2) {
+            if (!"MAP07".equals(m)) return;
+            if (t.type != 67 && t.type != 68) return;      // Mancubus / Arachnotron
+            need = t.type;
+        } else {
+            if (m.length() != 4) return;
+            int e = m.charAt(1) - '0', mm = m.charAt(3) - '0';
+            if (e == 1 && mm == 8) need = 3003;            // Baron of Hell
+            else if (e == 2 && mm == 8) need = 16;         // Cyberdemon
+            else if (e == 3 && mm == 8) need = 7;          // Spiderdemon
+            else if (e == 4 && mm == 6) need = 16;
+            else if (e == 4 && mm == 8) need = 7;
+            else return;
+            if (t.type != need) return;
+        }
+        for (int i = 0, n = g.mobjs.size(); i < n; i++) {
+            Mobj o = g.mobjs.get(i);
+            if (o != t && o.type == need && o.def != null && !o.corpse && !o.removed && o.health > 0) return;   // another one is still alive
+        }
+        Specials sp = g.specials;
+        sp.curLine = null;
+        if (d2) {
+            for (Level.Sector s : g.L.sectors) {
+                if (need == 67 && s.tag == 666) sp.startFloor(s, Specials.F_LOWER_LOWEST, false);
+                if (need == 68 && s.tag == 667) sp.startFloor(s, Specials.F_RAISE_TEX, false);
+            }
+            return;
+        }
+        char e = m.charAt(1);
+        if (e == '2' || e == '3') { g.exitLevel(false); return; }          // E2M8 / E3M8: end of the episode
+        for (Level.Sector s : g.L.sectors) {
+            if (s.tag != 666) continue;
+            if (m.equals("E4M6")) sp.startDoor(s, Specials.A_DOOR_STAY, true);
+            else sp.startFloor(s, Specials.F_LOWER_LOWEST, false);
         }
     }
 }

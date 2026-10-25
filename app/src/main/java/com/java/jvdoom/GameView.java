@@ -24,7 +24,7 @@ import java.util.List;
 
 /** Render/game thread, touch controls, status bar, automap and the Doom menu. */
 public final class GameView extends SurfaceView implements SurfaceHolder.Callback, Runnable {
-    static final double TIC_NS = 1e9 / 35.0;
+    double ticNs = 1e9 / 35.0;
     static final int[] RES = {180, 240, 360};
 
     final Game game;
@@ -43,11 +43,22 @@ public final class GameView extends SurfaceView implements SurfaceHolder.Callbac
     int resIndex = 1;
     boolean smooth = true;
     float sens = 1f;
-    boolean showFps;
+    boolean showFps, showStats, showTime, haptic;
+    // setup: gameplay modifiers and picture options (index into the arrays below)
+    int aspectIdx = 0;                       // screen shape: 0 = full (default), see ASPECT_VAL
+    static final float[] ASPECT_VAL = {0f, 4f / 3f, 5f / 4f, 16f / 10f, 16f / 9f, 21f / 9f, 1f};
+    int speedIdx = 1, takenIdx = 2, dealtIdx = 0, tempoIdx = 1, fovIdx = 1, filterIdx = 0;
+    static final float[] SPEED_VAL = {0.6f, 1f, 1.4f, 1.9f}, TAKEN_VAL = {0f, 0.5f, 1f, 2f}, DEALT_VAL = {1f, 2f, 4f, 10f},
+            TEMPO_VAL = {0.7f, 1f, 1.4f, 2f}, FOV_VAL = {1.25f, 1f, 0.8f, 0.65f};
+    int bright, crosshair;
+    static final int[] BOOST = {0, 3, 6, 10};
+    int lastHealth = 100;
     // Doom options
     boolean messagesOn = true, lowDetail;
     int screenBlocks = 10;                 // 3..10 = framed view (10 = full width + status bar), 11 = full screen
-    int sfxVol = 15;                       // 0..15
+    int sfxVol = 15, musVol = 9;            // 0..15
+    MusicPlayer music;
+    String musKey = "";                       // 0..15
     // JVDoom setup
     int hudSize = 1, ctlSize = 1, ctlAlpha = 2;     // 0..2
     static final float[] HUD_FRAC = {0.12f, 0.15f, 0.18f}, CTL_SCALE = {0.8f, 1f, 1.25f}, CTL_ALPHA = {0.4f, 0.7f, 1f};
@@ -88,7 +99,10 @@ public final class GameView extends SurfaceView implements SurfaceHolder.Callbac
         hudSize = Math.max(0, Math.min(2, prefs.getInt("hud", 1)));
         ctlSize = Math.max(0, Math.min(2, prefs.getInt("ctl", 1)));
         ctlAlpha = Math.max(0, Math.min(2, prefs.getInt("alpha", 2)));
+        musVol = Math.max(0, Math.min(15, prefs.getInt("mus", 9)));
         snd.volume = sfxVol / 15f;
+        music = new MusicPlayer(c, w);
+        music.setVolume(musVol / 15f);
         hud = new Hud(gx);
         menu = new Menu(this, hud);
         wi = new Intermission(this, hud);
@@ -96,17 +110,66 @@ public final class GameView extends SurfaceView implements SurfaceHolder.Callbac
         pBorder.setFilterBitmap(false);
         game.aimAssist = prefs.getBoolean("assist", true);
         showFps = prefs.getBoolean("fps", false);
+        showStats = prefs.getBoolean("stats", false); showTime = prefs.getBoolean("time", false); haptic = prefs.getBoolean("haptic", true);
+        aspectIdx = Math.max(0, Math.min(ASPECT_VAL.length - 1, prefs.getInt("aspect", 0)));
+        speedIdx = Math.max(0, Math.min(3, prefs.getInt("speed", 1))); takenIdx = Math.max(0, Math.min(3, prefs.getInt("taken", 2)));
+        dealtIdx = Math.max(0, Math.min(3, prefs.getInt("dealt", 0))); tempoIdx = Math.max(0, Math.min(3, prefs.getInt("tempo", 1)));
+        fovIdx = Math.max(0, Math.min(3, prefs.getInt("fov", 1))); filterIdx = Math.max(0, Math.min(4, prefs.getInt("filter", 0)));
+        bright = Math.max(0, Math.min(3, prefs.getInt("bright", 0))); crosshair = Math.max(0, Math.min(2, prefs.getInt("xhair", 0)));
+        Renderer.boost = BOOST[bright];
         getHolder().addCallback(this);
         setFocusable(true);
         pText.setTypeface(Typeface.DEFAULT_BOLD);
         pLine.setStrokeCap(Paint.Cap.ROUND);
     }
 
+    /** Picks the song for the current situation (title, intermission or the level) like Doom's S_Start / S_ChangeMusic. */
+    void updateMusic() {
+        String key = titleMode ? "T" : (game.state == Game.ST_EXIT ? "I" : "L" + game.mapName);
+        if (key.equals(musKey)) return;
+        musKey = key;
+        boolean d2 = wad.isDoom2();
+        String lump;
+        boolean loop = true;
+        if (titleMode) { lump = d2 ? "D_DM2TTL" : "D_INTRO"; loop = d2; }
+        else if (game.state == Game.ST_EXIT) lump = d2 ? "D_DM2INT" : "D_INTER";
+        else if (d2) {
+            String[] d2m = {"D_RUNNIN", "D_STALKS", "D_COUNTD", "D_BETWEE", "D_DOOM", "D_THE_DA", "D_SHAWN", "D_DDTBLU", "D_IN_CIT", "D_DEAD",
+                    "D_STLKS2", "D_THEDA2", "D_DOOM2", "D_DDTBL2", "D_RUNNI2", "D_DEAD2", "D_STLKS3", "D_ROMERO", "D_SHAWN2", "D_MESSAG",
+                    "D_COUNT2", "D_DDTBL3", "D_AMPIE", "D_THEDA3", "D_ADRIAN", "D_MESSG2", "D_ROMER2", "D_TENSE", "D_SHAWN3", "D_OPENIN",
+                    "D_EVIL", "D_ULTIMA"};
+            int n = 0;
+            try { n = Integer.parseInt(game.mapName.substring(3)) - 1; } catch (Exception ignored) { }
+            lump = d2m[Math.max(0, Math.min(d2m.length - 1, n))];
+        } else lump = "D_" + game.mapName;
+        if (!wad.has(lump)) return;
+        music.request(lump, loop);
+    }
+
+    /** Pushes the setup-menu choices into the game and the renderer (cheap, runs every frame). */
+    void applyOptions() {
+        game.speedMul = SPEED_VAL[speedIdx]; game.takenMul = TAKEN_VAL[takenIdx]; game.dealtMul = DEALT_VAL[dealtIdx];
+        ticNs = 1e9 / (35.0 * TEMPO_VAL[tempoIdx]);
+        Renderer.filter = filterIdx;
+        if (rend != null && rend.zoom != FOV_VAL[fovIdx]) rend.setZoom(FOV_VAL[fovIdx]);
+    }
+
+    /** Setup menu: back to the default settings. */
+    void resetPrefs() {
+        resIndex = 1; smooth = true; game.aimAssist = true; showFps = false; showStats = false; haptic = true;
+        hudSize = 1; ctlSize = 1; ctlAlpha = 2; bright = 0; crosshair = 0; Renderer.boost = 0; showTime = false;
+        aspectIdx = 0; speedIdx = 1; takenIdx = 2; dealtIdx = 0; tempoIdx = 1; fovIdx = 1; filterIdx = 0;
+        messagesOn = true; screenBlocks = 10; sens = 1f; musVol = 9; music.setVolume(musVol / 15f);
+        rebuildRenderer = true; relayout(); layoutButtons(); savePrefs();
+    }
+
     void savePrefs() {
         prefs.edit().putInt("res", resIndex).putBoolean("smooth", smooth).putFloat("sens", sens)
                 .putInt("skill", game.skill).putBoolean("assist", game.aimAssist).putBoolean("fps", showFps)
-                .putBoolean("msg", messagesOn).putBoolean("detail", lowDetail).putInt("blocks", screenBlocks).putInt("sfx", sfxVol)
-                .putInt("hud", hudSize).putInt("ctl", ctlSize).putInt("alpha", ctlAlpha).apply();
+                .putBoolean("msg", messagesOn).putBoolean("detail", lowDetail).putInt("blocks", screenBlocks).putInt("sfx", sfxVol).putInt("mus", musVol)
+                .putInt("hud", hudSize).putInt("ctl", ctlSize).putInt("alpha", ctlAlpha)
+                .putBoolean("stats", showStats).putBoolean("time", showTime)
+                .putInt("aspect", aspectIdx).putInt("speed", speedIdx).putInt("taken", takenIdx).putInt("dealt", dealtIdx).putInt("tempo", tempoIdx).putInt("fov", fovIdx).putInt("filter", filterIdx).putBoolean("haptic", haptic).putInt("bright", bright).putInt("xhair", crosshair).apply();
     }
 
     // ------------------------------------------------------------------ lifecycle
@@ -117,8 +180,8 @@ public final class GameView extends SurfaceView implements SurfaceHolder.Callbac
     }
     @Override public void surfaceDestroyed(SurfaceHolder h) { stopLoop(); }
 
-    public void onPauseActivity() { paused = true; game.inFire = false; game.inUse = false; game.inMove = 0; game.inStrafe = 0; sound.stop(); savePrefs(); }
-    public void onResumeActivity() { paused = false; sound.start(); }
+    public void onPauseActivity() { paused = true; game.inFire = false; game.inUse = false; game.inMove = 0; game.inStrafe = 0; sound.stop(); music.pause(); savePrefs(); }
+    public void onResumeActivity() { paused = false; sound.start(); music.resume(); }
 
     void startLoop() {
         if (thread != null) return;
@@ -155,12 +218,21 @@ public final class GameView extends SurfaceView implements SurfaceHolder.Callbac
             vW = Math.round(sw * screenBlocks / 10f); vH = Math.round(barTop * screenBlocks / 10f);
             vX = (sw - vW) / 2; vY = (barTop - vH) / 2;
         }
+        float asp = ASPECT_VAL[aspectIdx];                      // fit the picture to the chosen screen shape, centred
+        if (asp > 0f && vW > 0 && vH > 0) {
+            int nw = vW, nh = vH;
+            if ((float) vW / vH > asp) nw = Math.round(vH * asp); else nh = Math.round(vW / asp);
+            vX += (vW - nw) / 2; vY += (vH - nh) / 2; vW = nw; vH = nh;
+        }
         rebuildRenderer = true;
     }
 
     void beep(String lump) { if (sound != null) sound.play(lump, sound.lx, sound.ly); }
 
     void closeMenu() { menuOpen = false; }
+
+    /** A game can be saved while playing (not on the title screen, not while dead or on the end-of-level screen). */
+    boolean canSave() { return !titleMode && game.state == Game.ST_PLAY; }
 
     void openMenu() { releaseAll(); menu.open(); menuOpen = true; }
 
@@ -179,6 +251,16 @@ public final class GameView extends SurfaceView implements SurfaceHolder.Callbac
 
     void quitApp() { if (getContext() instanceof Activity) ((Activity) getContext()).finish(); }
 
+    void warpPrev() {
+        List<String> maps = wad.maps();
+        if (maps.isEmpty()) return;
+        int i = maps.indexOf(game.mapName);
+        final String n = maps.get((i - 1 + maps.size()) % maps.size());
+        synchronized (lock) { game.startMap(n, false); }
+        if (titleMode) titleMode = false;
+        menu.build();
+    }
+
     void warpNext() {
         List<String> maps = wad.maps();
         if (maps.isEmpty()) return;
@@ -196,15 +278,17 @@ public final class GameView extends SurfaceView implements SurfaceHolder.Callbac
         while (running) {
             if (paused) { try { Thread.sleep(50); } catch (InterruptedException e) { return; } last = System.nanoTime(); continue; }
             if (rebuildRenderer && sw > 0) buildRenderer();
+            applyOptions();
+            updateMusic();
             long now = System.nanoTime();
             acc += now - last; last = now;
             if (acc > 250e6) acc = 250e6;
             boolean freeze = menuOpen || titleMode || game.state == Game.ST_EXIT;
             synchronized (lock) {
                 if (!freeze) {
-                    while (acc >= TIC_NS) { game.tick(); acc -= TIC_NS; }
+                    while (acc >= ticNs) { game.tick(); acc -= ticNs; }
                 } else acc = 0;
-                if (!titleMode) game.render(freeze ? 1f : (float) (acc / TIC_NS));
+                if (!titleMode) game.render(freeze ? 1f : (float) (acc / ticNs));
             }
             draw();
             long used = System.nanoTime() - now;
@@ -245,7 +329,7 @@ public final class GameView extends SurfaceView implements SurfaceHolder.Callbac
             }
             Renderer r = rend;
             if (r == null || bmp == null) { c.drawColor(Color.BLACK); return; }
-            if (screenBlocks < 11) drawBorder(c);
+            if (screenBlocks < 11) drawBorder(c); else if (aspectIdx != 0) c.drawColor(Color.BLACK);
             bmp.setPixels(r.fb, 0, r.W, 0, 0, r.W, r.H);
             pBmp.setFilterBitmap(smooth);
             src.set(0, 0, r.W, r.H); dst.set(vX, vY, vX + vW, vY + vH);
@@ -322,7 +406,29 @@ public final class GameView extends SurfaceView implements SurfaceHolder.Callbac
             pFill.setColor(0x66000000); c.drawRect(0, 0, sw, sh, pFill);
             menu.draw(c, sw, sh);
         }
+        if (g.state == Game.ST_PLAY && !menuOpen && !mapOpen && crosshair > 0) drawCrosshair(c);
+        if (haptic) {
+            if (g.state == Game.ST_PLAY && g.health < lastHealth && !g.god && g.invuln <= 0) {
+                post(new Runnable() { public void run() { performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS, android.view.HapticFeedbackConstants.FLAG_IGNORE_GLOBAL_SETTING); } });
+            }
+        }
+        lastHealth = g.health;
+        if ((showStats || showTime) && g.state == Game.ST_PLAY && !menuOpen) {
+            String st = "";
+            if (showStats) st = "K " + g.kills + "/" + g.totalKills + "   I " + g.items + "/" + g.totalItems + "   S " + g.secrets + "/" + g.totalSecrets;
+            if (showTime) { int sec = g.levelTics / 35; st += (st.isEmpty() ? "" : "   ") + String.format("%d:%02d", sec / 60, sec % 60); }
+            text(c, st, 8 * d, (showFps ? 38 : 20) * d, 13 * d, Color.WHITE, Paint.Align.LEFT);
+        }
         if (showFps) text(c, fps + " fps  " + (rend != null ? rend.W + "x" + rend.H : ""), 8 * d, 20 * d, 13 * d, Color.YELLOW, Paint.Align.LEFT);
+    }
+
+    void drawCrosshair(Canvas c) {
+        float x = vX + vW / 2f, y = vY + vH / 2f, r = 3.5f * d;
+        pFill.setColor(0xCC00FF00);
+        if (crosshair == 1) { c.drawCircle(x, y, r * 0.55f, pFill); return; }
+        pLine.setColor(0xCC00FF00); pLine.setStrokeWidth(Math.max(1.5f, d * 1.2f));
+        c.drawLine(x - r * 2.2f, y, x - r * 0.8f, y, pLine); c.drawLine(x + r * 0.8f, y, x + r * 2.2f, y, pLine);
+        c.drawLine(x, y - r * 2.2f, x, y - r * 0.8f, pLine); c.drawLine(x, y + r * 0.8f, x, y + r * 2.2f, pLine);
     }
 
     void drawHud(Canvas c) {
